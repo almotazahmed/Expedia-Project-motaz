@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import List, Dict
 
-from api.flights.turkish_external import TurkishOnlineAPI
+from backend.api.flights.turkish_external import TurkishOnlineAPI
 
 
 class CustomerAccount:
@@ -79,9 +79,13 @@ class CustomerItineraryManager:
     def add_itinerary(self, customer_account: CustomerAccount, itinerary: Itinerary):
         customer_account.itineraries.append(itinerary)
 
-    def display_customer_itineraries(self, itinerary: Itinerary):
-        for reservation in itinerary.reservations:
-            reservation.display()
+    def display_customer_itineraries(self, itineraries_list: List[Itinerary]):
+        if len(itineraries_list) > 0:
+            for itinerary in itineraries_list:
+                for reservation in itinerary.reservations:
+                    reservation.display()
+        else:
+            print("There are no itineraries to present.")
 
 
 
@@ -132,11 +136,11 @@ class OnlineFlightAPI(ABC):
         pass
 
     @abstractmethod
-    def book(self, flight: Flight, customer_info: list) -> str:
+    def book_flight(self, flight: Flight, customer_info: list) -> str:
         pass
 
     @abstractmethod
-    def cancel(self, confirmation_id: str) -> bool:
+    def cancel_flight(self, confirmation_id: str) -> bool:
         pass
 
     @abstractmethod
@@ -152,11 +156,11 @@ class FlightReservation(Reservation):
         self.flight_api = flight_api
 
     def book(self):
-        self.confirmation_id = self.flight_api.book(self.flight.flight_fetched_object, self.customer_info)
+        self.confirmation_id = self.flight_api.book_flight(self.flight.flight_fetched_object, self.customer_info)
 
     def cancel(self):
         if self.confirmation_id:
-            self.flight_api.cancel(self.confirmation_id)
+            self.flight_api.cancel_flight(self.confirmation_id)
 
     def display(self):
         print(self.flight)
@@ -220,10 +224,10 @@ class TurkishOnlineFlightAPI(OnlineFlightAPI):
 
         return available_flights
 
-    def book(self, flight :TurkishFlight, customer_info :list) -> str:
+    def book_flight(self, flight :TurkishFlight, customer_info :list) -> str:
         return self.turkish_api.reserve_flight(customer_info, flight)
 
-    def cancel(self, confirmation_id :str) -> bool:
+    def cancel_flight(self, confirmation_id :str) -> bool:
         return self.turkish_api.cancel_flight(confirmation_id)
 
     def get_airline_name(self) -> str:
@@ -233,22 +237,22 @@ class TurkishOnlineFlightAPI(OnlineFlightAPI):
 
 
 
+#################################################################################################################################
 
-
-
-class FlightCancellation:
-    def __init__(self, flight_api: OnlineFlightAPI, confirmation_id: str):
-        self.flight_api = flight_api
-
-    def cancel_flight(self, confirmation_id: str) -> bool:
-        return self.flight_api.cancel(confirmation_id)
-
-
-
-class CancellationManager:
-    def __init__(self):
-        pass
-
+#
+# class FlightCancellation:
+#     def __init__(self, flight_api: OnlineFlightAPI, confirmation_id: str):
+#         self.flight_api = flight_api
+#
+#     def cancel_flight(self, confirmation_id: str) -> bool:
+#         return self.flight_api.cancel(confirmation_id)
+#
+#
+#
+# class CancellationManager:
+#     def __init__(self):
+#         pass
+#
 
 
 
