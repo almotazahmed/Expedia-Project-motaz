@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 from backend.api.flights.turkish_external import TurkishOnlineAPI
 
@@ -90,12 +90,14 @@ class CustomerItineraryManager:
 
 
 class ItineraryManager:
+    def __init__(self, itinerary: Itinerary):
+        self.__itinerary = itinerary
 
-    def add_reservation(self,itinerary: Itinerary, reservation: Reservation):
-        itinerary.reservations.append(reservation)
+    def add_reservation(self, reservation: Reservation):
+        self.__itinerary.reservations.append(reservation)
 
-    def book_all(self, itinerary: Itinerary):
-        for reservation in itinerary.reservations:
+    def book_all_reservations(self):
+        for reservation in self.__itinerary.reservations:
             reservation.book()
 
 
@@ -173,18 +175,18 @@ class FlightSearchManager:
         self.flight_apis = flight_apis
 
     def search_flights(self, date_from: datetime, from_location: str, date_to: datetime, to_location: str,
-                       num_infants: int, num_children: int, num_adults: int) -> List[Dict[OnlineFlightAPI, List[Flight]]]:
-        api_flight_list: List[Dict[OnlineFlightAPI, List[Flight]]] = []
-        flight_reservations: List[FlightReservation] = []
+                       num_infants: int, num_children: int, num_adults: int) -> Dict[int, Tuple[OnlineFlightAPI, Flight]]:
+        flight_map: Dict[int, Tuple[OnlineFlightAPI, Flight]] = {}
+        index = 1
+
         for api in self.flight_apis:
-            flights = api.fetch_flights(date_from, from_location, date_to, to_location, num_infants, num_children,
-                                        num_adults)
+            flights = api.fetch_flights(date_from, from_location, date_to, to_location, num_infants, num_children, num_adults)
 
-            api_flights = {api: flights}
+            for flight in flights:
+                flight_map[index] = (api, flight)
+                index += 1
 
-            api_flight_list.append(api_flights)
-
-        return api_flight_list
+        return flight_map
 
 
 
@@ -237,7 +239,51 @@ class TurkishOnlineFlightAPI(OnlineFlightAPI):
 
 
 
+class PaymentProcessorInterface(ABC):
+    @abstractmethod
+    def pay(self, amount):
+        pass
+
+class RefundProcessorInterface(ABC):
+    @abstractmethod
+    def refund(self, amount):
+        pass
+
+
+class PayPalPayment(PaymentProcessorInterface, RefundProcessorInterface):
+    def pay(self, amount):
+        print(f"Processing PayPal payment of {amount}")
+
+    def refund(self, amount):
+        print(f"Processing PayPal refund of {amount}")
+
+
+class StripePayment(PaymentProcessorInterface):
+    def pay(self, amount):
+        print(f"Processing Stripe payment of {amount}")
+
+
+class PaymentManager:
+    def __init__(self, payment_method: PaymentProcessorInterface):
+        self.payment_method = payment_method
+
+    def process_payment(self, amount):
+        self.payment_method.pay(amount)
+
+class RefundManager:
+    def __init__(self, refund_method: RefundProcessorInterface):
+        self.refund_method = refund_method
+
+    def process_refund(self, amount):
+        self.refund_method.refund(amount)
+
+
+
 #################################################################################################################################
+
+
+
+
 
 #
 # class FlightCancellation:
