@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import List, Dict, Tuple
 
 from backend.api.flights.turkish_external import TurkishOnlineAPI
+from backend.api.payment.paypal_external import *
 
 
 class CustomerAccount:
@@ -11,6 +12,7 @@ class CustomerAccount:
         self.__username = username
         self.__password = password
         self.itineraries: List[Itinerary] = []
+        self.cards = []
 
     def get_customer_id(self):
         return self.__customer_id
@@ -49,6 +51,54 @@ class CustomerAccountManager:
         return self.__authinticator.login(username, password, customer_account)
 
 
+class PaymentProcessorInterface(ABC):
+    @abstractmethod
+    def pay(self, amount):
+        pass
+
+
+class RefundProcessorInterface(ABC):
+    @abstractmethod
+    def refund(self, amount):
+        pass
+
+
+class PayPalPayment(PaymentProcessorInterface, RefundProcessorInterface):
+    def __init__(self, card: PayPalCreditCard):
+        self.paypal_api = PayPalOnlinePaymentAPI(card)
+
+
+    def pay(self, amount):
+        return self.paypal_api.pay_money(amount)
+
+    def refund(self, amount):
+        print(f"Processing PayPal refund of {amount}")
+
+
+class StripePayment(PaymentProcessorInterface, RefundProcessorInterface):
+    def pay(self, amount):
+        print(f"Processing Stripe payment of {amount}")
+
+    def refund(self, amount):
+        print(f"Processing PayPal refund of {amount}")
+
+
+class PaymentManager:
+    def __init__(self, payment_method: PaymentProcessorInterface):
+        self.payment_method = payment_method
+
+    def process_payment(self, amount):
+        return self.payment_method.pay(amount)
+
+
+class RefundManager:
+    def __init__(self, refund_method: RefundProcessorInterface):
+        self.refund_method = refund_method
+
+    def process_refund(self, amount):
+        self.refund_method.refund(amount)
+
+
 class Itinerary:
     def __init__(self):
         self.reservations: List[Reservation] = []
@@ -56,10 +106,12 @@ class Itinerary:
 
 
 class Reservation(ABC):
-    def __init__(self, customer: CustomerAccount, customer_info: list):
-        self.customer_id = customer.get_customer_id()
+    def __init__(self, customer_id: str, customer_info: list, cost: float):
+        self.customer_id = customer_id
         self.customer_info = customer_info
+        self.cost = cost
         self.confirmation_id = None
+        self.payment_confirmation_id = None
 
     @abstractmethod
     def book(self):
@@ -88,6 +140,15 @@ class CustomerItineraryManager:
             print("There are no itineraries to present.")
 
 
+class CustomerCardManager:
+
+    def add_card(self, customer_account: CustomerAccount, card):
+        customer_account.cards.append(card)
+
+
+
+
+
 
 class ItineraryManager:
     def __init__(self, itinerary: Itinerary):
@@ -95,10 +156,16 @@ class ItineraryManager:
 
     def add_reservation(self, reservation: Reservation):
         self.__itinerary.reservations.append(reservation)
+        self.__itinerary.total_cost += reservation.cost
 
-    def book_all_reservations(self):
+    def book_all_reservations(self, payment_method: PaymentProcessorInterface):
+        payment_mgr: PaymentManager = PaymentManager(payment_method)
         for reservation in self.__itinerary.reservations:
-            reservation.book()
+            status,  payment_confirmation_id = payment_mgr.process_payment(reservation.cost)
+            if status:
+                reservation.book()
+                reservation.payment_confirmation_id = payment_confirmation_id
+                return True
 
 
 
@@ -152,8 +219,8 @@ class OnlineFlightAPI(ABC):
 
 
 class FlightReservation(Reservation):
-    def __init__(self, customer: CustomerAccount, flight_api: OnlineFlightAPI, flight: Flight, customer_info: list):
-        super().__init__(customer, customer_info)
+    def __init__(self, customer_id: str, flight_api: OnlineFlightAPI, flight: Flight, customer_info: list):
+        super().__init__(customer_id, customer_info, flight.cost)
         self.flight = flight
         self.flight_api = flight_api
 
@@ -239,43 +306,7 @@ class TurkishOnlineFlightAPI(OnlineFlightAPI):
 
 
 
-class PaymentProcessorInterface(ABC):
-    @abstractmethod
-    def pay(self, amount):
-        pass
 
-class RefundProcessorInterface(ABC):
-    @abstractmethod
-    def refund(self, amount):
-        pass
-
-
-class PayPalPayment(PaymentProcessorInterface, RefundProcessorInterface):
-    def pay(self, amount):
-        print(f"Processing PayPal payment of {amount}")
-
-    def refund(self, amount):
-        print(f"Processing PayPal refund of {amount}")
-
-
-class StripePayment(PaymentProcessorInterface):
-    def pay(self, amount):
-        print(f"Processing Stripe payment of {amount}")
-
-
-class PaymentManager:
-    def __init__(self, payment_method: PaymentProcessorInterface):
-        self.payment_method = payment_method
-
-    def process_payment(self, amount):
-        self.payment_method.pay(amount)
-
-class RefundManager:
-    def __init__(self, refund_method: RefundProcessorInterface):
-        self.refund_method = refund_method
-
-    def process_refund(self, amount):
-        self.refund_method.refund(amount)
 
 
 
@@ -311,8 +342,5 @@ class RefundManager:
 
 
 
-class PaymentManager:
-    def __init__(self):
-        pass
 
 
