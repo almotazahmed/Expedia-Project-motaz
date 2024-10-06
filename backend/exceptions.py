@@ -27,3 +27,4 @@ class InvalidInputError(Exception):
     """Exception raised for invalid input when a number is expected."""
     def __init__(self, message="Invalid input, please enter a valid number"):
         super().__init__(message)
+
