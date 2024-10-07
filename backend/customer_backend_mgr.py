@@ -6,6 +6,7 @@ from typing import List, Dict, Tuple
 import bcrypt
 from backend.api.flights.turkish_external import TurkishOnlineAPI
 from backend.api.payment.paypal_external import *
+from backend.api.payment.stripe_external import StripeCardInfo, StripePaymentAPI, StripeUserInfo
 from backend.exceptions import *
 
 
@@ -17,7 +18,7 @@ class CustomerAccount:
         self._username = username
         self.__password_hash = self._hash_password(password)
         self.itineraries_manager = ItineraryCollectionManager()
-        self.cards_manager = CardCollectionManager()
+        self.payment_methods_manager = PaymentMethodsManager()
 
     def get_customer_id(self):
         return self._customer_id
@@ -26,10 +27,12 @@ class CustomerAccount:
         return self._username
 
     def _hash_password(self, password: str):
-        salt = os.urandom(16)  # Generate a random salt
-        return hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
+        # Use bcrypt to generate a salted hash
+        salt = bcrypt.gensalt()
+        return bcrypt.hashpw(password.encode(), salt)
 
     def verify_password(self, password: str):
+        # Verify the password using bcrypt
         return bcrypt.checkpw(password.encode(), self.__password_hash)
 
 ########################################################################################################################
@@ -45,19 +48,19 @@ class Profile:
         print(f"Hello {self.__customer_account.get_username()}")
 
 
-class Authinticator(ABC):
+class AuthinticatorInterface(ABC):
     @abstractmethod
     def login(self, username: str, password: str, customer_account: CustomerAccount) -> bool:
         pass
 
 
-class PasswordAuthenticator(Authinticator):
+class PasswordAuthenticator(AuthinticatorInterface):
     def login(self, username: str, password: str, customer_account: CustomerAccount) -> bool:
         return customer_account.get_username() == username and customer_account.verify_password(password)
 
 
 class CustomerLoginManager:
-    def __init__(self, authinticator: Authinticator):
+    def __init__(self, authinticator: AuthinticatorInterface):
         self.__authinticator = authinticator
 
     def authenticate_customer(self, username: str, password: str, customer_account: CustomerAccount) -> bool:
@@ -68,20 +71,21 @@ class CustomerLoginManager:
 
 ######################################    --Customer Account Payment Service--    ######################################
 
-class PaymentProcessorInterface(ABC):
+class PaymentInterface(ABC):
     @abstractmethod
     def pay(self, amount):
         pass
 
 
-class RefundProcessorInterface(ABC):
+class RegularPaymentInterface(PaymentInterface):
     @abstractmethod
-    def refund(self, amount):
+    def refund(self, transaction_id):
         pass
 
 
-class PayPalPayment(PaymentProcessorInterface, RefundProcessorInterface):
+class PayPalPayment(RegularPaymentInterface):
     def __init__(self, card: PayPalCreditCard):
+        self.__card = card
         self.paypal_api = PayPalOnlinePaymentAPI(card)
 
     def pay(self, amount):
@@ -90,44 +94,54 @@ class PayPalPayment(PaymentProcessorInterface, RefundProcessorInterface):
     def refund(self, transaction_id):
         return self.paypal_api.cancel_money(transaction_id)
 
+    def __str__(self):
+        return f"PayPalCard:- Name: {self.__card.name}, Number: {self.__card.id}, Expiry Date: {self.__card.expire_date}"
 
 
-class StripePayment(PaymentProcessorInterface, RefundProcessorInterface):
+
+
+class StripePayment(RegularPaymentInterface):
+    def __init__(self, card: StripeCardInfo, user_info: StripeUserInfo):
+        self.__stripe_card = card
+        self.user_info = user_info
+        self.stripe_api = StripePaymentAPI()
 
     def pay(self, amount):
-        print(f"Processing Stripe payment of {amount}")
+        return self.stripe_api.withdraw_money(self.user_info, self.__stripe_card, amount)
 
-    def refund(self, amount):
-        print(f"Processing PayPal refund of {amount}")
+    def refund(self, transaction_id):
+        return self.stripe_api.cancel_money(transaction_id)
 
 
 class PaymentManager:
-    def __init__(self, payment_method: PaymentProcessorInterface):
+    def __init__(self, payment_method: RegularPaymentInterface):
         self.payment_method = payment_method
 
     def process_payment(self, amount):
-        return self.payment_method.pay(amount)
+        if amount > 0:
+            return self.payment_method.pay(amount)
 
 
 class RefundManager:
-    def __init__(self, refund_method: RefundProcessorInterface):
+    def __init__(self, refund_method: RegularPaymentInterface):
         self.refund_method = refund_method
 
-    def process_refund(self, amount):
-        self.refund_method.refund(amount)
+    def process_refund(self, transaction_id):
+        if transaction_id is not None:
+            return self.refund_method.refund(transaction_id)
 
 ########################################################################################################################
 
 
-######################################    --Abstract Reservation Container--    ########################################
+######################################    --Abstract ReservationInterface Container--    ########################################
 
-class Reservation(ABC):
+class ReservationInterface(ABC):
     def __init__(self, customer_id: str, customer_info: list, cost: float):
         self._customer_id = customer_id
         self._customer_info = customer_info
         self._cost = cost
-        self._confirmation_id = None
-        self._payment_confirmation_id = None
+        self._booking_confirmation_id = None
+        self._payment_transaction_id = None
 
     def get_customer_id(self):
         return self._customer_id
@@ -142,16 +156,16 @@ class Reservation(ABC):
         return self._cost
 
     def set_confirmation_id(self, confirmation_id):
-        self._confirmation_id = confirmation_id
+        self._booking_confirmation_id = confirmation_id
 
     def get_confirmation_id(self):
-        return self._confirmation_id
+        return self._booking_confirmation_id
 
-    def set_payment_confirmation_id(self, payment_confirmation_id):
-        self._payment_confirmation_id = payment_confirmation_id
+    def set_payment_transaction_id(self, payment_confirmation_id):
+        self._payment_transaction_id = payment_confirmation_id
 
-    def get_payment_confirmation_id(self):
-        return self._payment_confirmation_id
+    def get_payment_transaction_id(self):
+        return self._payment_transaction_id
 
 
     @abstractmethod
@@ -173,22 +187,22 @@ class Reservation(ABC):
 
 class Itinerary:
     def __init__(self):
-        self._reservations: List[Reservation] = []
+        self._reservations: List[ReservationInterface] = []
         self._total_cost = 0
 
     @property
-    def reservations(self) -> List[Reservation]:
+    def reservations(self) -> List[ReservationInterface]:
         return self._reservations
 
     @property
     def total_cost(self) -> float:
         return self._total_cost
 
-    def add_reservation(self, reservation: Reservation):
+    def add_reservation(self, reservation: ReservationInterface):
         self._reservations.append(reservation)
         self._total_cost += reservation.get_cost()
 
-    def remove_reservation(self, reservation: Reservation):
+    def remove_reservation(self, reservation: ReservationInterface):
         if reservation in self._reservations:
             self._reservations.remove(reservation)
             self._total_cost -= reservation.get_cost()
@@ -218,12 +232,16 @@ class ItineraryCollectionManager:
 
 ##########################################    --Customer's Cards Manager--    ##########################################
 
-class CardCollectionManager:
+class PaymentMethodsManager:
     def __init__(self):
-        self._cards = []
+        self._payment_methods: List[RegularPaymentInterface] = []
 
-    def add_card(self, card):
-        self._cards.append(card)
+    def add_payment_method(self, payment_method):
+        self._payment_methods.append(payment_method)
+
+    def display_payment_methods(self):
+        for payment_method in self._payment_methods:
+            print(payment_method)
 
 ########################################################################################################################
 
@@ -234,42 +252,57 @@ class SingleItineraryManager:
     def __init__(self, itinerary: Itinerary):
         self._itinerary = itinerary
 
-    def add_reservation(self, reservation: Reservation):
+    def add_reservation(self, reservation: ReservationInterface):
         self._itinerary.add_reservation(reservation)
 
-    def book_all_reservations(self, payment_method: PaymentProcessorInterface):
-        payment_mgr: PaymentManager = PaymentManager(payment_method)
+    def book_all_reservations(self, payment_method: RegularPaymentInterface):
+        payment_mgr = PaymentManager(payment_method)
         booked_reservations = []
 
         try:
             for reservation in self._itinerary.reservations:
-
-                status, payment_confirmation_id = payment_mgr.process_payment(reservation.get_cost())
-
-                if not status:
-                    raise PaymentProcessingError("Payment failed for reservation.")
-
-                reservation.book()
-
-                if not reservation.get_confirmation_id() or not isinstance(reservation.get_confirmation_id(), str):
+                if not self._process_reservation(payment_mgr, reservation):
                     raise BookingError(f"Failed to book reservation [{reservation.display()}]")
-
-                reservation.set_payment_confirmation_id(payment_confirmation_id)
                 booked_reservations.append(reservation)
 
             return True
 
         except (PaymentProcessingError, BookingError) as e:
-            print(f"Error occurred: {e}")
-            self._rollback_booked_reservations(booked_reservations, payment_method)
-            self._remove_failed_reservations()
+            self._handle_booking_failure(booked_reservations, payment_method, e)
             return False
 
-    def _rollback_booked_reservations(self, booked_reservations: List[Reservation], payment_method):
+    def _process_reservation(self, payment_mgr, reservation):
+        status, payment_confirmation_id = payment_mgr.process_payment(reservation.get_cost())
+
+        if not status:
+            raise PaymentProcessingError("Payment failed for reservation.")
+
+
+        if not reservation.book():
+            self._process_refund(payment_mgr, reservation)
+            return False
+
+        reservation.set_payment_transaction_id(payment_confirmation_id)
+        return True
+
+
+    def _process_refund(self, payment_mgr, reservation):
+        refund_mgr = RefundManager(payment_mgr)
+        try:
+            refund_mgr.process_refund(reservation.get_payment_transaction_id())
+        except Exception as e:
+            print(f"Failed to process refund: {e}")
+
+    def _handle_booking_failure(self, booked_reservations, payment_method, error):
+        print(f"Error occurred: {error}")
+        self._rollback_booked_reservations(booked_reservations, payment_method)
+        self._remove_failed_reservations()
+
+    def _rollback_booked_reservations(self, booked_reservations: List[ReservationInterface], payment_method):
         refund_mgr: RefundManager = RefundManager(payment_method)
         for reservation in booked_reservations:
             try:
-                refund_mgr.process_refund(reservation.get_payment_confirmation_id())
+                refund_mgr.process_refund(reservation.get_payment_transaction_id())
                 reservation.cancel()
             except Exception as e:
                 print(f"Failed to rollback reservation {reservation.get_confirmation_id()}: {e}")
@@ -278,6 +311,11 @@ class SingleItineraryManager:
         failed_reservations = [r for r in self._itinerary.reservations if not r.get_confirmation_id()]
         for reservation in failed_reservations:
             self._itinerary.remove_reservation(reservation)
+
+    def cancel_all(self, payment_method):
+        self._itinerary.reservations.clear()
+        print("All reservations have been cancelled and removed.")
+
 
 
 
@@ -309,7 +347,7 @@ class Flight(ABC):
 
 
 
-class OnlineFlightAPI(ABC):
+class FlightAPIInterface(ABC):
     @abstractmethod
     def fetch_flights(self, date_from: datetime, from_location: str, date_to: datetime, to_location: str,
                       num_infants: int, num_children: int, num_adults: int) -> list[Flight]:
@@ -324,9 +362,8 @@ class OnlineFlightAPI(ABC):
         pass
 
 
-
-class FlightReservation(Reservation):
-    def __init__(self, customer_id: str, flight_api: OnlineFlightAPI, flight: Flight, customer_info: list):
+class FlightReservation(ReservationInterface):
+    def __init__(self, customer_id: str, flight_api: FlightAPIInterface, flight: Flight, customer_info: list):
         super().__init__(customer_id, customer_info, flight.cost)
         self.flight = flight
         self.flight_api = flight_api
@@ -334,20 +371,32 @@ class FlightReservation(Reservation):
     def book(self):
         try:
             confirmation_id = self.flight_api.book_flight(self.flight.flight_fetched_object, self.get_customer_info())
-
-            if not confirmation_id or not isinstance(confirmation_id, str):
-                raise BookingError(f"Failed to book flight [{self.flight}]")
+            if not confirmation_id:
+                raise BookingError("Failed to get a valid confirmation ID from the flight API.")
 
             self.set_confirmation_id(confirmation_id)
-        except BookingError as e:
+            return True
+
+        except Exception as e:
             print(f"Booking error: {e}")
-            raise
+            return False
 
     def cancel(self):
-        if self.get_confirmation_id():
-            self.set_confirmation_id(None)
-            self.set_payment_confirmation_id(None)
-            return self.flight_api.cancel_flight(self.get_confirmation_id())
+        try:
+            confirmation_id = self.get_confirmation_id()
+            if not confirmation_id:
+                raise BookingError("No confirmation ID found for this reservation.")
+
+            if not self.flight_api.cancel_flight(confirmation_id):
+                raise CancellationError(f"Failed to cancel flight with confirmation ID {confirmation_id}.")
+
+            self._booking_confirmation_id = None
+            self._payment_transaction_id = None
+            return True
+
+        except Exception as e:
+            print(f"Cancellation error: {e}")
+            return False
 
     def display(self):
         print(self.flight)
@@ -366,7 +415,7 @@ class TurkishFlight(Flight):
                 f"#Infants: {self._num_infants} - #Children: {self._num_children} - #Adults: {self._num_adults}")
 
 
-class TurkishOnlineFlightAPI(OnlineFlightAPI):
+class TurkishFlightAPI(FlightAPIInterface):
     def __init__(self):
         self.turkish_api = TurkishOnlineAPI()
 
@@ -399,12 +448,12 @@ class TurkishOnlineFlightAPI(OnlineFlightAPI):
 
 # --- Search Manager ---
 class FlightSearchManager:
-    def __init__(self, flight_apis: List[OnlineFlightAPI]):
+    def __init__(self, flight_apis: List[FlightAPIInterface]):
         self.flight_apis = flight_apis
 
     def search_flights(self, date_from: datetime, from_location: str, date_to: datetime, to_location: str,
-                       num_infants: int, num_children: int, num_adults: int) -> Dict[int, Tuple[OnlineFlightAPI, Flight]]:
-        flight_map: Dict[int, Tuple[OnlineFlightAPI, Flight]] = {}
+                       num_infants: int, num_children: int, num_adults: int) -> Dict[int, Tuple[FlightAPIInterface, Flight]]:
+        flight_map: Dict[int, Tuple[FlightAPIInterface, Flight]] = {}
         index = 1
 
         for api in self.flight_apis:
@@ -421,36 +470,6 @@ class FlightSearchManager:
 
 
 #################################################################################################################################
-
-
-
-
-
-#
-# class FlightCancellation:
-#     def __init__(self, flight_api: OnlineFlightAPI, confirmation_id: str):
-#         self.flight_api = flight_api
-#
-#     def cancel_flight(self, confirmation_id: str) -> bool:
-#         return self.flight_api.cancel(confirmation_id)
-#
-#
-#
-# class CancellationManager:
-#     def __init__(self):
-#         pass
-#
-
-
-
-
-
-# class CancelationManager:
-#     def __init__(self, flight_cancelation_mgr: FlightCancellationManager):
-#         self.flight_cancelation_mgr = flight_cancelation_mgr
-
-
-
 
 
 

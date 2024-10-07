@@ -140,7 +140,7 @@
 #                     self.__total_cost += reservation.get_reservation_object().get_cost()
 #                     successful_reservations.append(reservation)
 #                 else:
-#                     print(f"Reservation failed to complete: {reservation.get_reservation_object()}.")
+#                     print(f"ReservationInterface failed to complete: {reservation.get_reservation_object()}.")
 #                     return False
 #             else:
 #                 print(f"Payment failed to complete pay for: {reservation.get_reservation_object()}.")
@@ -199,7 +199,7 @@
 # ###########################################################################################################
 #
 #
-# class Reservation:
+# class ReservationInterface:
 #     def __init__(self):
 #         self.__reservation_type = None
 #         self.__reservation_object = None
@@ -247,7 +247,7 @@
 # ###########################################################################################################
 #
 #
-# class FlightReservation(Reservation):
+# class FlightReservation(ReservationInterface):
 #     def __init__(self):
 #         super().__init__()
 #         self.set_reservation_type("flight")
@@ -394,7 +394,7 @@
 # ###########################################################################################################
 #
 #
-# class HotelReservation(Reservation):
+# class HotelReservation(ReservationInterface):
 #     def __init__(self):
 #         super().__init__()
 #         self.set_reservation_type("hotel")

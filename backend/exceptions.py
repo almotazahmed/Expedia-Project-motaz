@@ -17,6 +17,12 @@ class BookingError(CustomBaseException):
         super().__init__(message)
 
 
+class CancellationError(CustomBaseException):
+    """Exception raised for cancellation errors."""
+    def __init__(self, message="cancellation failed"):
+        super().__init__(message)
+
+
 class NetworkError(CustomBaseException):
     """Exception raised for network-related errors."""
     def __init__(self, message="Network issue encountered"):

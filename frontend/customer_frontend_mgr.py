@@ -6,12 +6,13 @@ from backend.exceptions import InvalidInputError
 
 class FrontEndManager:
     def run(self):
-        print("Welcome to the Flight Reservation System!")
+        print("Welcome to the Flight ReservationInterface System!")
         self.base_ui()
 
     def base_ui(self):
 
         customer1: CustomerAccount = CustomerAccount('1304', 'user', '1234')
+
 
 
         while True:
@@ -21,7 +22,7 @@ class FrontEndManager:
                 username = input("Enter Username: ")
                 password = input("Enter Password: ")
                 pass_auth: PasswordAuthenticator = PasswordAuthenticator()
-                costumer_acc_mgr: CustomerAccountManager = CustomerAccountManager(pass_auth)
+                costumer_acc_mgr: CustomerLoginManager = CustomerLoginManager(pass_auth)
 
                 if costumer_acc_mgr.authenticate_customer(username, password, customer1):
                     self.customer_processing_page(customer1)
@@ -45,14 +46,12 @@ class FrontEndManager:
 
             elif choice == 2:
                 itinerary: Itinerary = Itinerary()
-                customer_itinerary_mgr: CustomerItineraryManager = CustomerItineraryManager()
-                itinerary_mgr: ItineraryManager = ItineraryManager(itinerary)
+                itinerary_mgr: SingleItineraryManager = SingleItineraryManager(itinerary)
                 self.make_reservations(itinerary_mgr, customer.get_customer_id())
-                customer_itinerary_mgr.add_itinerary(customer, itinerary)
+                customer.itineraries_manager.add_itinerary(itinerary)
 
             elif choice == 3:
-                itinerary_mgr: CustomerItineraryManager = CustomerItineraryManager()
-                itinerary_mgr.display_customer_itineraries(customer.itineraries)
+                customer.itineraries_manager.display_itineraries()
 
             elif choice == 4:
                 exit()
@@ -60,13 +59,13 @@ class FrontEndManager:
             else:
                 print("Invalid input, please enter a number (1, 2, 3 or 4).")
 
-    def make_reservations(self, itinerary_mgr: ItineraryManager, customer_id: str):
+    def make_reservations(self, itinerary_mgr: SingleItineraryManager, customer_id: str):
         while True:
             choice = self.get_user_choice(f"Create your itinerary:\n1) Add flight\n2) Add Hotel\n3) Reserve itinerary\n4) Cancel itinerary\nEnter your choice (from 1 to 4): ", 4)
 
             if choice == 1:
                 selected_api, selected_flight = self.select_flight()
-                flight_reservation: Reservation = FlightReservation(customer_id, selected_api, selected_flight, [])
+                flight_reservation: ReservationInterface = FlightReservation(customer_id, selected_api, selected_flight, [])
                 itinerary_mgr.add_reservation(flight_reservation)
 
             elif choice == 2:
@@ -88,7 +87,7 @@ class FrontEndManager:
 
     def select_flight(self):
         flight_data: dict[str, Union[str, datetime, int]] = self.get_customer_flight_info()
-        turkish_flight_api = TurkishOnlineFlightAPI()
+        turkish_flight_api = TurkishFlightAPI()
         flight_research_mgr = FlightSearchManager([turkish_flight_api])
         flight_map = flight_research_mgr.search_flights(flight_data["date_from"],
                                                         flight_data["from_location"],
