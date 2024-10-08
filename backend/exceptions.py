@@ -11,6 +11,12 @@ class PaymentProcessingError(CustomBaseException):
         super().__init__(message)
 
 
+class RefundProcessingError(CustomBaseException):
+    """Exception raised for payment processing errors."""
+    def __init__(self, message="Refund processing failed"):
+        super().__init__(message)
+
+
 class BookingError(CustomBaseException):
     """Exception raised for booking-related errors."""
     def __init__(self, message="Booking failed"):
@@ -29,8 +35,15 @@ class NetworkError(CustomBaseException):
         super().__init__(message)
 
 
-class InvalidInputError(Exception):
+class InvalidInputError(CustomBaseException):
     """Exception raised for invalid input when a number is expected."""
     def __init__(self, message="Invalid input, please enter a valid number"):
         super().__init__(message)
+
+class LoginError(CustomBaseException):
+    """Exception raised for login error."""
+    def __init__(self, message="Invalid Username or Password. Please try again."):
+        super().__init__(message)
+
+
 

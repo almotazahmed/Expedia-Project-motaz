@@ -1,5 +1,4 @@
-import hashlib
-import os
+import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import List, Dict, Tuple
@@ -9,6 +8,8 @@ from backend.api.payment.paypal_external import *
 from backend.api.payment.stripe_external import StripeCardInfo, StripePaymentAPI, StripeUserInfo
 from backend.exceptions import *
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 #########################################    --Customer Account Container--    #########################################
 
@@ -27,18 +28,16 @@ class CustomerAccount:
         return self._username
 
     def _hash_password(self, password: str):
-        # Use bcrypt to generate a salted hash
         salt = bcrypt.gensalt()
         return bcrypt.hashpw(password.encode(), salt)
 
     def verify_password(self, password: str):
-        # Verify the password using bcrypt
         return bcrypt.checkpw(password.encode(), self.__password_hash)
 
 ########################################################################################################################
 
 
-######################################    --Customer Account Display Service--    ######################################
+#########################################    --Customer Account Services--    ##########################################
 
 class Profile:
     def __init__(self, customer_account: CustomerAccount):
@@ -95,9 +94,8 @@ class PayPalPayment(RegularPaymentInterface):
         return self.paypal_api.cancel_money(transaction_id)
 
     def __str__(self):
-        return f"PayPalCard:- Name: {self.__card.name}, Number: {self.__card.id}, Expiry Date: {self.__card.expire_date}"
-
-
+        return (f"PayPalCreditcard:- Name: {self.__card.name}, Number: {self.__card.id}, "
+                f"Expiry Date: {self.__card.expire_date}")
 
 
 class StripePayment(RegularPaymentInterface):
@@ -112,9 +110,16 @@ class StripePayment(RegularPaymentInterface):
     def refund(self, transaction_id):
         return self.stripe_api.cancel_money(transaction_id)
 
+    def __str__(self):
+        return (f"StripeCard:- Name: {self.user_info.name}, Number: {self.__stripe_card.id}, "
+                f"Expiry Date: {self.__stripe_card.expire_date}")
+
 
 class PaymentManager:
-    def __init__(self, payment_method: RegularPaymentInterface):
+    def __init__(self):
+        self.payment_method = None
+
+    def set_payment_method(self, payment_method: RegularPaymentInterface):
         self.payment_method = payment_method
 
     def process_payment(self, amount):
@@ -123,7 +128,10 @@ class PaymentManager:
 
 
 class RefundManager:
-    def __init__(self, refund_method: RegularPaymentInterface):
+    def __init__(self):
+        self.refund_method = None
+
+    def set_refund_method(self, refund_method: RegularPaymentInterface):
         self.refund_method = refund_method
 
     def process_refund(self, transaction_id):
@@ -133,7 +141,7 @@ class RefundManager:
 ########################################################################################################################
 
 
-######################################    --Abstract ReservationInterface Container--    ########################################
+#################################    --Abstract ReservationInterface Container--    ####################################
 
 class ReservationInterface(ABC):
     def __init__(self, customer_id: str, customer_info: list, cost: float):
@@ -188,14 +196,13 @@ class ReservationInterface(ABC):
 class Itinerary:
     def __init__(self):
         self._reservations: List[ReservationInterface] = []
-        self._total_cost = 0
+        self._total_cost = 0.0
 
-    @property
-    def reservations(self) -> List[ReservationInterface]:
+
+    def get_reservations(self) -> List[ReservationInterface]:
         return self._reservations
 
-    @property
-    def total_cost(self) -> float:
+    def get_total_cost(self) -> float:
         return self._total_cost
 
     def add_reservation(self, reservation: ReservationInterface):
@@ -221,8 +228,10 @@ class ItineraryCollectionManager:
 
     def display_itineraries(self):
         if len(self._itineraries) > 0:
+            print(f"Listing {len(self._itineraries)} itineraries")
             for itinerary in self._itineraries:
-                for reservation in itinerary.reservations:
+                print(f"Itinerary total cost {itinerary.get_total_cost()}")
+                for reservation in itinerary.get_reservations():
                     reservation.display()
         else:
             print("There are no itineraries to present.")
@@ -234,14 +243,20 @@ class ItineraryCollectionManager:
 
 class PaymentMethodsManager:
     def __init__(self):
-        self._payment_methods: List[RegularPaymentInterface] = []
+        self._payment_methods: Dict[int, RegularPaymentInterface] = {}
+        self._num_payment_methods = 0
 
     def add_payment_method(self, payment_method):
-        self._payment_methods.append(payment_method)
+        self._num_payment_methods += 1
+        self._payment_methods[self._num_payment_methods] = payment_method
 
     def display_payment_methods(self):
-        for payment_method in self._payment_methods:
-            print(payment_method)
+        for idx, payment_method in self._payment_methods.items():
+            print(f"{idx}) {payment_method}")
+        return self._num_payment_methods
+
+    def get_payment_method(self, choice: int):
+        return self._payment_methods[choice]
 
 ########################################################################################################################
 
@@ -249,72 +264,75 @@ class PaymentMethodsManager:
 #############################################    --Itinerary Manager--    ##############################################
 
 class SingleItineraryManager:
-    def __init__(self, itinerary: Itinerary):
+    def __init__(self, itinerary: Itinerary, payment_mgr: PaymentManager, refund_mgr: RefundManager):
         self._itinerary = itinerary
+        self.payment_mgr = payment_mgr
+        self.refund_mgr = refund_mgr
 
     def add_reservation(self, reservation: ReservationInterface):
         self._itinerary.add_reservation(reservation)
 
-    def book_all_reservations(self, payment_method: RegularPaymentInterface):
-        payment_mgr = PaymentManager(payment_method)
+    def book_all_reservations(self):
         booked_reservations = []
 
         try:
-            for reservation in self._itinerary.reservations:
-                if not self._process_reservation(payment_mgr, reservation):
+            for reservation in self._itinerary.get_reservations():
+                if not self._process_reservation(reservation):
                     raise BookingError(f"Failed to book reservation [{reservation.display()}]")
                 booked_reservations.append(reservation)
-
+            logger.info("All reservations successfully booked.")
             return True
 
         except (PaymentProcessingError, BookingError) as e:
-            self._handle_booking_failure(booked_reservations, payment_method, e)
+            self._handle_booking_failure(booked_reservations, e)
             return False
 
-    def _process_reservation(self, payment_mgr, reservation):
-        status, payment_confirmation_id = payment_mgr.process_payment(reservation.get_cost())
+    def _process_reservation(self, reservation: ReservationInterface):
+        status, payment_confirmation_id = self.payment_mgr.process_payment(reservation.get_cost())
 
         if not status:
-            raise PaymentProcessingError("Payment failed for reservation.")
+            raise PaymentProcessingError(f"Payment failed for reservation [{reservation.display()}].")
 
 
         if not reservation.book():
-            self._process_refund(payment_mgr, reservation)
+            self._process_refund(reservation)
             return False
 
         reservation.set_payment_transaction_id(payment_confirmation_id)
         return True
 
 
-    def _process_refund(self, payment_mgr, reservation):
-        refund_mgr = RefundManager(payment_mgr)
+    def _process_refund(self, reservation):
         try:
-            refund_mgr.process_refund(reservation.get_payment_transaction_id())
-        except Exception as e:
-            print(f"Failed to process refund: {e}")
+            if not self.refund_mgr.process_refund(reservation.get_payment_transaction_id()):
+                raise NetworkError(f"Refund failed for reservation [{reservation.display()}].")
+        except NetworkError as e:
+            logger.error(f"Failed to process refund: {e}")
 
-    def _handle_booking_failure(self, booked_reservations, payment_method, error):
-        print(f"Error occurred: {error}")
-        self._rollback_booked_reservations(booked_reservations, payment_method)
-        self._remove_failed_reservations()
 
-    def _rollback_booked_reservations(self, booked_reservations: List[ReservationInterface], payment_method):
-        refund_mgr: RefundManager = RefundManager(payment_method)
+    def _handle_booking_failure(self, booked_reservations, error):
+        logger.error(f"Error occurred during booking: {error}")
+        self._rollback_booked_reservations(booked_reservations)
+
+
+    def _rollback_booked_reservations(self, booked_reservations: List[ReservationInterface]):
         for reservation in booked_reservations:
             try:
-                refund_mgr.process_refund(reservation.get_payment_transaction_id())
-                reservation.cancel()
-            except Exception as e:
-                print(f"Failed to rollback reservation {reservation.get_confirmation_id()}: {e}")
+                if not self.refund_mgr.process_refund(reservation.get_payment_transaction_id()) or not reservation.cancel():
+                    raise NetworkError(f"Rollback failed for reservation [{reservation.display()}].")
+            except NetworkError as e:
+                logger.error(f"Failed to rollback reservation: {e}")
 
-    def _remove_failed_reservations(self):
-        failed_reservations = [r for r in self._itinerary.reservations if not r.get_confirmation_id()]
-        for reservation in failed_reservations:
-            self._itinerary.remove_reservation(reservation)
 
-    def cancel_all(self, payment_method):
-        self._itinerary.reservations.clear()
-        print("All reservations have been cancelled and removed.")
+    def cancel_all(self):
+        if len(self._itinerary.get_reservations()) == 0:
+            logger.info("There is no reservation to cancel.")
+
+        else:
+            self._itinerary.get_reservations().clear()
+            logger.info("All reservations have been cancelled and removed.")
+
+        return True
 
 
 
@@ -399,7 +417,7 @@ class FlightReservation(ReservationInterface):
             return False
 
     def display(self):
-        print(self.flight)
+        print(f"\t{self.flight}")
 
 
 #Type 1 from flights companies
