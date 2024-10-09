@@ -70,19 +70,19 @@ class CustomerLoginManager:
 
 ######################################    --Customer Account Payment Service--    ######################################
 
-class PaymentInterface(ABC):
+class PaymentMethodInterface(ABC):
     @abstractmethod
     def pay(self, amount):
         pass
 
 
-class RegularPaymentInterface(PaymentInterface):
+class RefundablePaymentMethodInterface(PaymentMethodInterface):
     @abstractmethod
     def refund(self, transaction_id):
         pass
 
 
-class PayPalPayment(RegularPaymentInterface):
+class PayPalPayment(RefundablePaymentMethodInterface):
     def __init__(self, card: PayPalCreditCard):
         self.__card = card
         self.paypal_api = PayPalOnlinePaymentAPI(card)
@@ -98,7 +98,7 @@ class PayPalPayment(RegularPaymentInterface):
                 f"Expiry Date: {self.__card.expire_date}")
 
 
-class StripePayment(RegularPaymentInterface):
+class StripePayment(RefundablePaymentMethodInterface):
     def __init__(self, card: StripeCardInfo, user_info: StripeUserInfo):
         self.__stripe_card = card
         self.user_info = user_info
@@ -119,24 +119,17 @@ class PaymentManager:
     def __init__(self):
         self.payment_method = None
 
-    def set_payment_method(self, payment_method: RegularPaymentInterface):
+    def set_payment_method(self, payment_method: RefundablePaymentMethodInterface):
         self.payment_method = payment_method
 
     def process_payment(self, amount):
         if amount > 0:
             return self.payment_method.pay(amount)
 
-
-class RefundManager:
-    def __init__(self):
-        self.refund_method = None
-
-    def set_refund_method(self, refund_method: RegularPaymentInterface):
-        self.refund_method = refund_method
-
     def process_refund(self, transaction_id):
         if transaction_id is not None:
-            return self.refund_method.refund(transaction_id)
+            return self.payment_method.refund(transaction_id)
+
 
 ########################################################################################################################
 
@@ -243,7 +236,7 @@ class ItineraryCollectionManager:
 
 class PaymentMethodsManager:
     def __init__(self):
-        self._payment_methods: Dict[int, RegularPaymentInterface] = {}
+        self._payment_methods: Dict[int, RefundablePaymentMethodInterface] = {}
         self._num_payment_methods = 0
 
     def add_payment_method(self, payment_method):
@@ -264,10 +257,9 @@ class PaymentMethodsManager:
 #############################################    --Itinerary Manager--    ##############################################
 
 class SingleItineraryManager:
-    def __init__(self, itinerary: Itinerary, payment_mgr: PaymentManager, refund_mgr: RefundManager):
+    def __init__(self, itinerary: Itinerary, payment_mgr: PaymentManager):
         self._itinerary = itinerary
         self.payment_mgr = payment_mgr
-        self.refund_mgr = refund_mgr
 
     def add_reservation(self, reservation: ReservationInterface):
         self._itinerary.add_reservation(reservation)
@@ -279,7 +271,9 @@ class SingleItineraryManager:
             for reservation in self._itinerary.get_reservations():
                 if not self._process_reservation(reservation):
                     raise BookingError(f"Failed to book reservation [{reservation.display()}]")
+
                 booked_reservations.append(reservation)
+
             logger.info("All reservations successfully booked.")
             return True
 
@@ -304,13 +298,13 @@ class SingleItineraryManager:
 
     def _process_refund(self, reservation):
         try:
-            if not self.refund_mgr.process_refund(reservation.get_payment_transaction_id()):
+            if not self.payment_mgr.process_refund(reservation.get_payment_transaction_id()):
                 raise NetworkError(f"Refund failed for reservation [{reservation.display()}].")
         except NetworkError as e:
             logger.error(f"Failed to process refund: {e}")
 
 
-    def _handle_booking_failure(self, booked_reservations, error):
+    def _handle_booking_failure(self, booked_reservations: List[ReservationInterface], error):
         logger.error(f"Error occurred during booking: {error}")
         self._rollback_booked_reservations(booked_reservations)
 
@@ -318,7 +312,7 @@ class SingleItineraryManager:
     def _rollback_booked_reservations(self, booked_reservations: List[ReservationInterface]):
         for reservation in booked_reservations:
             try:
-                if not self.refund_mgr.process_refund(reservation.get_payment_transaction_id()) or not reservation.cancel():
+                if not self.payment_mgr.process_refund(reservation.get_payment_transaction_id()) or not reservation.cancel():
                     raise NetworkError(f"Rollback failed for reservation [{reservation.display()}].")
             except NetworkError as e:
                 logger.error(f"Failed to rollback reservation: {e}")

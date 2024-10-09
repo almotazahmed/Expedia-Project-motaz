@@ -78,8 +78,7 @@ class FrontEndManager:
     def create_itinerary(self):
         itinerary = Itinerary()
         payment_mgr = PaymentManager()
-        refund_mgr = RefundManager()
-        itinerary_mgr: SingleItineraryManager = SingleItineraryManager(itinerary, payment_mgr, refund_mgr)
+        itinerary_mgr: SingleItineraryManager = SingleItineraryManager(itinerary, payment_mgr)
 
         if self.make_reservations(itinerary_mgr):
             self.customer.itineraries_manager.add_itinerary(itinerary)
@@ -109,9 +108,8 @@ class FrontEndManager:
 
             elif choice == 3:
                 if num_reservations > 0:
-                    payment_method: RegularPaymentInterface = self.select_payment_method()
+                    payment_method: RefundablePaymentMethodInterface = self.select_payment_method()
                     itinerary_mgr.payment_mgr.set_payment_method(payment_method)
-                    itinerary_mgr.refund_mgr.set_refund_method(payment_method)
                     if itinerary_mgr.book_all_reservations():
                         return True
                 else:
@@ -286,7 +284,7 @@ class FrontEndManager:
 #                 print("not supported yet.")
 #
 #             elif choice == 3:
-#                 payment_method: RegularPaymentInterface = self.select_payment_method()
+#                 payment_method: RefundablePaymentMethodInterface = self.select_payment_method()
 #                 itinerary_mgr.payment_mgr.set_payment_method(payment_method)
 #                 itinerary_mgr.refund_mgr.set_refund_method(payment_method)
 #                 itinerary_mgr.book_all_reservations()
