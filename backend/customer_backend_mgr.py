@@ -3,9 +3,10 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import List, Dict, Tuple
 import bcrypt
-from backend.api.flights.turkish_external import TurkishOnlineAPI
+from backend.api.flights.turkish_external import *
+from backend.api.flights.aircanada_external import *
 from backend.api.payment.paypal_external import *
-from backend.api.payment.stripe_external import StripeCardInfo, StripePaymentAPI, StripeUserInfo
+from backend.api.payment.stripe_external import *
 from backend.exceptions import *
 
 logging.basicConfig(level=logging.INFO)
@@ -178,7 +179,7 @@ class ReservationInterface(ABC):
         pass
 
     @abstractmethod
-    def display(self):
+    def __str__(self):
         pass
 
 ########################################################################################################################
@@ -225,7 +226,7 @@ class ItineraryCollectionManager:
             for itinerary in self._itineraries:
                 print(f"Itinerary total cost {itinerary.get_total_cost()}")
                 for reservation in itinerary.get_reservations():
-                    reservation.display()
+                    print(reservation)
         else:
             print("There are no itineraries to present.")
 
@@ -270,7 +271,7 @@ class SingleItineraryManager:
         try:
             for reservation in self._itinerary.get_reservations():
                 if not self._process_reservation(reservation):
-                    raise BookingError(f"Failed to book reservation [{reservation.display()}]")
+                    raise BookingError(f"Failed to book reservation [{reservation}]")
 
                 booked_reservations.append(reservation)
 
@@ -285,7 +286,7 @@ class SingleItineraryManager:
         status, payment_confirmation_id = self.payment_mgr.process_payment(reservation.get_cost())
 
         if not status:
-            raise PaymentProcessingError(f"Payment failed for reservation [{reservation.display()}].")
+            raise PaymentProcessingError(f"Payment failed for reservation [{reservation}].")
 
 
         if not reservation.book():
@@ -299,7 +300,7 @@ class SingleItineraryManager:
     def _process_refund(self, reservation):
         try:
             if not self.payment_mgr.process_refund(reservation.get_payment_transaction_id()):
-                raise NetworkError(f"Refund failed for reservation [{reservation.display()}].")
+                raise NetworkError(f"Refund failed for reservation [{reservation}].")
         except NetworkError as e:
             logger.error(f"Failed to process refund: {e}")
 
@@ -313,7 +314,7 @@ class SingleItineraryManager:
         for reservation in booked_reservations:
             try:
                 if not self.payment_mgr.process_refund(reservation.get_payment_transaction_id()) or not reservation.cancel():
-                    raise NetworkError(f"Rollback failed for reservation [{reservation.display()}].")
+                    raise NetworkError(f"Rollback failed for reservation [{reservation}].")
             except NetworkError as e:
                 logger.error(f"Failed to rollback reservation: {e}")
 
@@ -331,7 +332,7 @@ class SingleItineraryManager:
 
 
 
-class Flight(ABC):
+class Flight:
     def __init__(self, flight_fetched_object, airline_name: str, from_loc: str, date_from: datetime,
                  to_location: str, date_to: datetime, num_infants: int, num_children: int, num_adults: int, cost: float):
         self._flight_fetched_object = flight_fetched_object
@@ -353,9 +354,10 @@ class Flight(ABC):
     def cost(self):
         return self._cost
 
-    @abstractmethod
     def __str__(self):
-        pass
+        return (f"{self._airline_name}: Cost {self._cost} - From: {self._from_loc} on {self._date_from} "
+                f"To: {self._to_location} on {self._date_to} - "
+                f"#Infants: {self._num_infants} - #Children: {self._num_children} - #Adults: {self._num_adults}")
 
 
 
@@ -410,21 +412,9 @@ class FlightReservation(ReservationInterface):
             print(f"Cancellation error: {e}")
             return False
 
-    def display(self):
-        print(f"\t{self.flight}")
-
-
-#Type 1 from flights companies
-class TurkishFlight(Flight):
-    def __init__(self, flight_fetched_object: object, airline_name: str, from_loc: str, date_from: datetime,
-                 to_location: str, date_to: datetime, num_infants: int, num_children: int, num_adults: int, cost: float):
-        super().__init__(flight_fetched_object,airline_name, from_loc, date_from,
-                 to_location, date_to, num_infants, num_children, num_adults, cost)
-
     def __str__(self):
-        return (f"{self._airline_name}: Cost {self._cost} - From: {self._from_loc} on {self._date_from} "
-                f"To: {self._to_location} on {self._date_to} - "
-                f"#Infants: {self._num_infants} - #Children: {self._num_children} - #Adults: {self._num_adults}")
+        return f"\t{self.flight}"
+
 
 
 class TurkishFlightAPI(FlightAPIInterface):
@@ -437,8 +427,8 @@ class TurkishFlightAPI(FlightAPIInterface):
 
         flight_objects = self.turkish_api.get_available_flights()
         for flight in flight_objects:
-            available_flights.append(TurkishFlight(flight_fetched_object=flight,
-                                       airline_name="Turkish Airlines",
+            available_flights.append(Flight(flight_fetched_object=flight,
+                                       airline_name= self.get_company_name(),
                                        from_loc=from_location,
                                        date_from=flight.datetime_from,
                                        to_location=to_location,
@@ -456,6 +446,41 @@ class TurkishFlightAPI(FlightAPIInterface):
     def cancel_flight(self, confirmation_id :str) -> bool:
         return self.turkish_api.cancel_flight(confirmation_id)
 
+    def get_company_name(self) -> str:
+        return "Turkish Airlines"
+
+
+class AirCanadaFlightAPI(FlightAPIInterface):
+    def __init__(self):
+        self.aircanada_api = AirCanadaOnlineAPI()
+
+    def fetch_flights(self, date_from :datetime, from_location :str, date_to :datetime, to_location: str,
+                      num_infants: int, num_children: int, num_adults: int) -> List[Flight]:
+        available_flights = []
+
+        flight_objects = self.aircanada_api.get_flights(from_location, date_from, to_location, date_to, num_adults, num_children)
+        for flight in flight_objects:
+            available_flights.append(Flight(flight_fetched_object=flight,
+                                       airline_name= self.get_company_name(),
+                                       from_loc=from_location,
+                                       date_from=flight.date_time_from,
+                                       to_location=to_location,
+                                       date_to=flight.date_time_to,
+                                       num_infants=num_infants,
+                                       num_children=num_children,
+                                       num_adults=num_adults,
+                                       cost=flight.price))
+
+        return available_flights
+
+    def book_flight(self, flight :AirCanadaFlight, customer_info :list) -> str:
+        return self.aircanada_api.reserve_flight(flight, customer_info)
+
+    def cancel_flight(self, confirmation_id :str) -> bool:
+        return self.aircanada_api.cancel_flight(confirmation_id)
+
+    def get_company_name(self) -> str:
+        return "AirCanada"
 
 
 # --- Search Manager ---

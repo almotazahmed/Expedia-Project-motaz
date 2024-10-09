@@ -129,7 +129,8 @@ class FrontEndManager:
     def select_flight(self):
         flight_data = self.get_customer_flight_info()
         turkish_flight_api: FlightAPIInterface = TurkishFlightAPI()
-        flight_research_mgr = FlightSearchManager([turkish_flight_api])
+        aircanada_flight_api: FlightAPIInterface = AirCanadaFlightAPI()
+        flight_research_mgr = FlightSearchManager([turkish_flight_api, aircanada_flight_api])
         flight_map = flight_research_mgr.search_flights(
             flight_data["date_from"], flight_data["from_location"],
             flight_data["date_to"], flight_data["to_location"],
