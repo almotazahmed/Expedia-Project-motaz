@@ -103,8 +103,11 @@ class FrontEndManager:
                 num_reservations += 1
 
             elif choice == 2:
-                print("Not supported yet.")
-                # num_reservations += 1
+                selected_api, selected_room = self.select_room()
+                hotel_reservation: ReservationInterface = HotelReservation(self.customer.get_customer_id(),
+                                                                             selected_api, selected_room, [])
+                itinerary_mgr.add_reservation(hotel_reservation)
+                num_reservations += 1
 
             elif choice == 3:
                 if num_reservations > 0:
@@ -128,8 +131,8 @@ class FrontEndManager:
 
     def select_flight(self):
         flight_data = self.get_customer_flight_info()
-        turkish_flight_api: FlightAPIInterface = TurkishFlightAPI()
-        aircanada_flight_api: FlightAPIInterface = AirCanadaFlightAPI()
+        turkish_flight_api: FlightOnlineAPIInterface = TurkishFlightOnlineOnlineAPI()
+        aircanada_flight_api: FlightOnlineAPIInterface = AirCanadaFlightOnlineOnlineAPI()
         flight_research_mgr = FlightSearchManager([turkish_flight_api, aircanada_flight_api])
         flight_map = flight_research_mgr.search_flights(
             flight_data["date_from"], flight_data["from_location"],
@@ -151,6 +154,37 @@ class FrontEndManager:
             "to_location": self.get_input_string("Enter destination: "),
             "date_to": self.get_input_date("Enter return date (DD-MM-YYYY): "),
             "num_infants": self.get_input_integer("Enter number of infants: "),
+            "num_children": self.get_input_integer("Enter number of children: "),
+            "num_adults": self.get_input_integer("Enter number of adults: ")
+        }
+
+    def select_room(self):
+        room_data = self.get_customer_room_info()
+        hilton_hotel_api: HotelOnlineAPIInterface = HiltonHotelOnlineOnlineAPI()
+        marriott_hotel_api: HotelOnlineAPIInterface = MarriottHotelOnlineOnlineAPI()
+        room_research_mgr = RoomSearchManager([hilton_hotel_api, marriott_hotel_api])
+        room_map = room_research_mgr.search_rooms(room_data["location"],
+                                                    room_data["date_from"],
+                                                    room_data["date_to"],
+                                                    room_data["num_adults"],
+                                                    room_data["num_children"],
+                                                    room_data["num_rooms"]
+                                                    )
+        print("Select a hotel:")
+        for idx, (api, hotel) in room_map.items():
+            print(f"{idx}) {hotel}")
+
+        selected_index = self.get_user_choice(f"Enter your choice (from 1 to {len(room_map)}): ", len(room_map))
+        return room_map[selected_index]
+
+
+    def get_customer_room_info(self):
+        return {
+            "room_type": self.get_input_string("Enter room type: "),
+            "date_from": self.get_input_date("Enter from date (DD-MM-YYYY): "),
+            "date_to": self.get_input_date("Enter to date (DD-MM-YYYY): "),
+            "location": self.get_input_string("Enter location: "),
+            "num_rooms": self.get_input_integer("Enter number of rooms: "),
             "num_children": self.get_input_integer("Enter number of children: "),
             "num_adults": self.get_input_integer("Enter number of adults: ")
         }
@@ -310,7 +344,7 @@ class FrontEndManager:
 #
 #     def select_flight(self):
 #         flight_data: dict[str, Union[str, datetime, int]] = self.get_customer_flight_info()
-#         turkish_flight_api: FlightAPIInterface = TurkishFlightAPI()
+#         turkish_flight_api: FlightOnlineAPIInterface = TurkishFlightOnlineOnlineAPI()
 #         flight_research_mgr = FlightSearchManager([turkish_flight_api])
 #         flight_map = flight_research_mgr.search_flights(flight_data["date_from"],
 #                                                         flight_data["from_location"],

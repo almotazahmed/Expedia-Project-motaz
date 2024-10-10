@@ -17,7 +17,7 @@ class MarriottHotelAPI:
     def search_available_rooms(location, from_date, to_date, adults, children, needed_rooms):
         rooms = []
         rooms.append(MarriottRoom("City View", 5, 444.0, "24-01-2022", "12-02-2022"))
-        rooms.append(MarriottRoom("Deluxe View", 3, 350.0, "28-01-2022", "190-02-2022"))
+        rooms.append(MarriottRoom("Deluxe View", 3, 350.0, "28-01-2022", "19-02-2022"))
         return rooms
 
     @staticmethod

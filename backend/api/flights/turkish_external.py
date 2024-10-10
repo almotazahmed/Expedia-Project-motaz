@@ -28,7 +28,7 @@ class TurkishOnlineAPI:
     def reserve_flight(customers_info: list, flight: TurkishFlight):
         confirmation_id = '1234TTTTT'  # None for failure
         return confirmation_id
-        # return None     # Try None
+        # return None     # Try None '1234TTTTT'
 
     @staticmethod
     def cancel_flight(confirmation_id):

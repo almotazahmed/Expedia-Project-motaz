@@ -5,6 +5,8 @@ from typing import List, Dict, Tuple
 import bcrypt
 from backend.api.flights.turkish_external import *
 from backend.api.flights.aircanada_external import *
+from backend.api.hotels.hilton_external import *
+from backend.api.hotels.marriott_external import *
 from backend.api.payment.paypal_external import *
 from backend.api.payment.stripe_external import *
 from backend.exceptions import *
@@ -45,7 +47,7 @@ class Profile:
         self.__customer_account = customer_account
 
     def view_profile(self):
-        print(f"Hello {self.__customer_account.get_username()}")
+        print(f"\nHello {self.__customer_account.get_username()}")
 
 
 class AuthinticatorInterface(ABC):
@@ -126,11 +128,16 @@ class PaymentManager:
     def process_payment(self, amount):
         if amount > 0:
             return self.payment_method.pay(amount)
+        else:
+            logger.info("The should be grater than zero.")
+
 
     def process_refund(self, transaction_id):
         if transaction_id is not None:
             return self.payment_method.refund(transaction_id)
-
+        else:
+            logger.info("There is no transaction id.")
+            return False, None
 
 ########################################################################################################################
 
@@ -139,11 +146,13 @@ class PaymentManager:
 
 class ReservationInterface(ABC):
     def __init__(self, customer_id: str, customer_info: list, cost: float):
+        self.reservation_id = None
         self._customer_id = customer_id
         self._customer_info = customer_info
         self._cost = cost
         self._booking_confirmation_id = None
         self._payment_transaction_id = None
+        self._reservation_date = datetime.now()
 
     def get_customer_id(self):
         return self._customer_id
@@ -203,10 +212,10 @@ class Itinerary:
         self._reservations.append(reservation)
         self._total_cost += reservation.get_cost()
 
-    def remove_reservation(self, reservation: ReservationInterface):
-        if reservation in self._reservations:
-            self._reservations.remove(reservation)
-            self._total_cost -= reservation.get_cost()
+    # def remove_reservation(self, reservation: ReservationInterface):
+    #     if reservation in self._reservations:
+    #         self._reservations.remove(reservation)
+    #         self._total_cost -= reservation.get_cost()
 
 ########################################################################################################################
 
@@ -228,7 +237,7 @@ class ItineraryCollectionManager:
                 for reservation in itinerary.get_reservations():
                     print(reservation)
         else:
-            print("There are no itineraries to present.")
+            print("\nThere are no itineraries to present.")
 
 ########################################################################################################################
 
@@ -270,12 +279,12 @@ class SingleItineraryManager:
 
         try:
             for reservation in self._itinerary.get_reservations():
-                if not self._process_reservation(reservation):
-                    raise BookingError(f"Failed to book reservation [{reservation}]")
+
+                self._process_reservation(reservation)
 
                 booked_reservations.append(reservation)
 
-            logger.info("All reservations successfully booked.")
+            logger.info("\nAll reservations successfully booked.")
             return True
 
         except (PaymentProcessingError, BookingError) as e:
@@ -286,14 +295,14 @@ class SingleItineraryManager:
         status, payment_confirmation_id = self.payment_mgr.process_payment(reservation.get_cost())
 
         if not status:
-            raise PaymentProcessingError(f"Payment failed for reservation [{reservation}].")
+            raise PaymentProcessingError(f"\nPayment failed for reservation [{reservation}].")
 
+        reservation.set_payment_transaction_id(payment_confirmation_id)
 
         if not reservation.book():
             self._process_refund(reservation)
-            return False
+            raise BookingError(f"\nFailed to book reservation [{reservation}]")
 
-        reservation.set_payment_transaction_id(payment_confirmation_id)
         return True
 
 
@@ -302,11 +311,11 @@ class SingleItineraryManager:
             if not self.payment_mgr.process_refund(reservation.get_payment_transaction_id()):
                 raise NetworkError(f"Refund failed for reservation [{reservation}].")
         except NetworkError as e:
-            logger.error(f"Failed to process refund: {e}")
+            logger.error(f"\nFailed to process refund: {e}")
 
 
     def _handle_booking_failure(self, booked_reservations: List[ReservationInterface], error):
-        logger.error(f"Error occurred during booking: {error}")
+        logger.error(f"\nError occurred during booking: {error}")
         self._rollback_booked_reservations(booked_reservations)
 
 
@@ -329,8 +338,10 @@ class SingleItineraryManager:
 
         return True
 
+########################################################################################################################
 
 
+####################################    --Flight Reservation Service Classes --    #####################################
 
 class Flight:
     def __init__(self, flight_fetched_object, airline_name: str, from_loc: str, date_from: datetime,
@@ -360,8 +371,7 @@ class Flight:
                 f"#Infants: {self._num_infants} - #Children: {self._num_children} - #Adults: {self._num_adults}")
 
 
-
-class FlightAPIInterface(ABC):
+class FlightOnlineAPIInterface(ABC):
     @abstractmethod
     def fetch_flights(self, date_from: datetime, from_location: str, date_to: datetime, to_location: str,
                       num_infants: int, num_children: int, num_adults: int) -> list[Flight]:
@@ -375,25 +385,25 @@ class FlightAPIInterface(ABC):
     def cancel_flight(self, confirmation_id: str) -> bool:
         pass
 
+    @abstractmethod
+    def get_company_name(self) -> str:
+        pass
+
 
 class FlightReservation(ReservationInterface):
-    def __init__(self, customer_id: str, flight_api: FlightAPIInterface, flight: Flight, customer_info: list):
+    def __init__(self, customer_id: str, flight_api: FlightOnlineAPIInterface, flight: Flight, customer_info: list):
         super().__init__(customer_id, customer_info, flight.cost)
         self.flight = flight
         self.flight_api = flight_api
 
     def book(self):
-        try:
-            confirmation_id = self.flight_api.book_flight(self.flight.flight_fetched_object, self.get_customer_info())
-            if not confirmation_id:
-                raise BookingError("Failed to get a valid confirmation ID from the flight API.")
+        confirmation_id = self.flight_api.book_flight(self.flight.flight_fetched_object, self.get_customer_info())
 
-            self.set_confirmation_id(confirmation_id)
-            return True
-
-        except Exception as e:
-            print(f"Booking error: {e}")
+        if confirmation_id is None:
             return False
+
+        self.set_confirmation_id(confirmation_id)
+        return True
 
     def cancel(self):
         try:
@@ -416,8 +426,7 @@ class FlightReservation(ReservationInterface):
         return f"\t{self.flight}"
 
 
-
-class TurkishFlightAPI(FlightAPIInterface):
+class TurkishFlightOnlineOnlineAPI(FlightOnlineAPIInterface):
     def __init__(self):
         self.turkish_api = TurkishOnlineAPI()
 
@@ -450,7 +459,7 @@ class TurkishFlightAPI(FlightAPIInterface):
         return "Turkish Airlines"
 
 
-class AirCanadaFlightAPI(FlightAPIInterface):
+class AirCanadaFlightOnlineOnlineAPI(FlightOnlineAPIInterface):
     def __init__(self):
         self.aircanada_api = AirCanadaOnlineAPI()
 
@@ -482,15 +491,14 @@ class AirCanadaFlightAPI(FlightAPIInterface):
     def get_company_name(self) -> str:
         return "AirCanada"
 
-
-# --- Search Manager ---
+# --- Flight Search Manager --- #
 class FlightSearchManager:
-    def __init__(self, flight_apis: List[FlightAPIInterface]):
+    def __init__(self, flight_apis: List[FlightOnlineAPIInterface]):
         self.flight_apis = flight_apis
 
     def search_flights(self, date_from: datetime, from_location: str, date_to: datetime, to_location: str,
-                       num_infants: int, num_children: int, num_adults: int) -> Dict[int, Tuple[FlightAPIInterface, Flight]]:
-        flight_map: Dict[int, Tuple[FlightAPIInterface, Flight]] = {}
+                       num_infants: int, num_children: int, num_adults: int) -> Dict[int, Tuple[FlightOnlineAPIInterface, Flight]]:
+        flight_map: Dict[int, Tuple[FlightOnlineAPIInterface, Flight]] = {}
         index = 1
 
         for api in self.flight_apis:
@@ -502,11 +510,185 @@ class FlightSearchManager:
 
         return flight_map
 
+########################################################################################################################
 
 
+####################################    --Hotel Reservation Service Classes --    #####################################
+
+class Room:
+    def __init__(self, room_fetched_object, hotel_name: str, room_type: str=None, rooms_available: int=0, num_rooms_needed: int=0,
+                  price_per_night: float=0.0, date_from: datetime=None, date_to: datetime=None, location: str=None, num_children: int=0, num_adults: int=0):
+
+        self._room_fetched_object = room_fetched_object
+        self._hotel_name = hotel_name
+        self._room_type = room_type
+        self._rooms_available = rooms_available
+        self._num_rooms_needed = num_rooms_needed
+        self._price_per_night = price_per_night
+        self._date_from = date_from
+        self._date_to = date_to
+        self._num_children = num_children
+        self._num_adults = num_adults
+        self._num_nights = (date_to - date_from).days
+        self._cost = self._num_nights * self._price_per_night * self._num_rooms_needed
+
+    @property
+    def room_fetched_object(self):
+        return self._room_fetched_object
+
+    @property
+    def cost(self):
+        return self._cost
+
+    def __str__(self):
+        return (f"{self._hotel_name}: Per night: {self._price_per_night} - Total Cost: {self._cost} - From {self._num_rooms_needed} "
+                f"on: {self._date_from} - #num_nights {self._num_nights} - "
+                f"#num rooms: {self._rooms_available} - #Children: {self._num_children} - #Adults: {self._num_adults}")
 
 
-#################################################################################################################################
+class HotelOnlineAPIInterface(ABC):
+    @abstractmethod
+    def fetch_rooms(self, location: str, from_date: datetime, to_date: datetime, adults: int, children: int, needed_rooms: int) -> list[Room]:
+        pass
+
+    @abstractmethod
+    def book_room(self, room: Room, customer_info: list) -> str:
+        pass
+
+    @abstractmethod
+    def cancel_room(self, confirmation_id: str) -> bool:
+        pass
+
+    @abstractmethod
+    def get_hotel_name(self) -> str:
+        pass
 
 
+class HotelReservation(ReservationInterface):
+    def __init__(self, customer_id: str, hotel_api: HotelOnlineAPIInterface, room: Room, customer_info: list):
+        super().__init__(customer_id, customer_info, room.cost)
+        self.room = room
+        self.hotel_api = hotel_api
+
+    def book(self):
+        confirmation_id = self.hotel_api.book_room(self.room.room_fetched_object, self.get_customer_info())
+
+        if confirmation_id is None:
+            return False
+
+        self.set_confirmation_id(confirmation_id)
+        return True
+
+    def cancel(self):
+        try:
+            confirmation_id = self.get_confirmation_id()
+            if not confirmation_id:
+                raise BookingError("No confirmation ID found for this reservation.")
+
+            if not self.hotel_api.cancel_room(confirmation_id):
+                raise CancellationError(f"Failed to cancel reservation with confirmation ID {confirmation_id}.")
+
+            self._booking_confirmation_id = None
+            self._payment_transaction_id = None
+            return True
+
+        except Exception as e:
+            print(f"Cancellation error: {e}")
+            return False
+
+    def __str__(self):
+        return f"\t{self.room}"
+
+
+class HiltonHotelOnlineOnlineAPI(HotelOnlineAPIInterface):
+    def __init__(self):
+        self.hilton_api = HiltonHotelAPI()
+
+    def fetch_rooms(self, location: str, from_date: datetime, to_date: datetime, adults: int, children: int,
+                    needed_rooms: int) -> List[Room]:
+        available_rooms = []
+
+        room_objects = self.hilton_api.search_rooms(location, from_date, to_date, adults, children, needed_rooms)
+        for room in room_objects:
+            available_rooms.append(Room(
+                                        room_fetched_object=room,
+                                        hotel_name = self.get_hotel_name(),
+                                        room_type = room.room_type,
+                                        rooms_available = room.available,
+                                        num_rooms_needed = needed_rooms,
+                                        price_per_night = room.price_per_night,
+                                        date_from = from_date,
+                                        date_to = to_date,
+                                        num_children = children,
+                                        num_adults = adults
+
+            ))
+
+        return available_rooms
+
+    def book_room(self, room: HiltonRoom, customer_info :list) -> str:
+        return self.hilton_api.reserve_room(room, customer_info)
+
+    def cancel_room(self, confirmation_id :str) -> bool:
+        return self.hilton_api.cancel_room(confirmation_id)
+
+    def get_hotel_name(self) -> str:
+        return "Hilton"
+
+
+class MarriottHotelOnlineOnlineAPI(HotelOnlineAPIInterface):
+    def __init__(self):
+        self.marriott_api = MarriottHotelAPI()
+
+    def fetch_rooms(self, location: str, from_date: datetime, to_date: datetime, adults: int, children: int,
+                    needed_rooms: int) -> List[Room]:
+        available_rooms = []
+
+        room_objects = self.marriott_api.search_available_rooms(location, from_date, to_date, adults, children, needed_rooms)
+        for room in room_objects:
+            available_rooms.append(Room(
+                                        room_fetched_object=room,
+                                        hotel_name = self.get_hotel_name(),
+                                        room_type = room.room_type,
+                                        rooms_available = room.available,
+                                        num_rooms_needed = needed_rooms,
+                                        price_per_night = room.price_per_night,
+                                        date_from = from_date,
+                                        date_to = to_date,
+                                        num_children = children,
+                                        num_adults = adults
+
+            ))
+
+        return available_rooms
+
+    def book_room(self, room: MarriottRoom, customer_info :list) -> str:
+        return self.marriott_api.do_room_reservation(room, customer_info)
+
+    def cancel_room(self, confirmation_id :str) -> bool:
+        return self.marriott_api.cancel_room(confirmation_id)
+
+    def get_hotel_name(self) -> str:
+        return "Marriott"
+
+
+class RoomSearchManager:
+    def __init__(self, hotel_apis: List[HotelOnlineAPIInterface]):
+        self.hotel_apis = hotel_apis
+
+    def search_rooms(self, location: str, from_date: datetime, to_date: datetime, adults: int, children: int,
+                     needed_rooms: int) -> Dict[int, Tuple[HotelOnlineAPIInterface, Room]]:
+        room_map: Dict[int, Tuple[HotelOnlineAPIInterface, Room]] = {}
+        index = 1
+
+        for api in self.hotel_apis:
+            rooms = api.fetch_rooms(location, from_date, to_date, adults, children, needed_rooms)
+
+            for room in rooms:
+                room_map[index] = (api, room)
+                index += 1
+
+        return room_map
+
+########################################################################################################################
 
