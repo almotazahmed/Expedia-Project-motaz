@@ -1,5 +1,4 @@
-from typing import Union
-import logging
+
 from backend.customer_backend_mgr import *
 from backend.exceptions import InvalidInputError
 from backend.api.payment.paypal_external import PayPalCreditCard
@@ -23,23 +22,25 @@ class FrontEndManager:
 
         self.customer.payment_methods_manager.add_payment_method(paypal_method)
         self.customer.payment_methods_manager.add_payment_method(stripe_method)
-        print("Welcome to the Flight Reservation System!")
+        print("\nWelcome to the Flight Reservation System!")
 
         self.base_ui()
+
 
     def base_ui(self):
         """Initial UI for login/signup"""
         while True:
             choice = self.get_user_choice(
-                "System Access: \n1) Login\n2) Sign up\n3) Exit\nEnter your choice (from 1 to 3): ", 3)
+                "\nSystem Access: \n1) Login\n2) Sign up\n3) Exit\nEnter your choice (from 1 to 3): ", 3)
             if choice == 1:
                 self.login()
             elif choice == 2:
                 # self.signup()  # Currently not implemented
-                print("Not supported yet.")
+                logger.info("\nNot supported yet.")
             elif choice == 3:
-                print("Exiting system.")
+                logger.info("\nExiting system.")
                 exit()
+
 
     def login(self):
         """Login Interface"""
@@ -49,10 +50,13 @@ class FrontEndManager:
         customer_account_mgr: CustomerLoginManager = CustomerLoginManager(pass_auth)
         try:
             if not customer_account_mgr.authenticate_customer(username, password, self.customer):
-                raise LoginError("Login failed")
+                raise LoginError("\nLogin failed")
+
+            logger.info("\nlogged successfully")
             self.customer_processing_page()
         except LoginError as e:
-            logger.error(f"Login failed for user {username}: {e}")
+            logger.error(f"\nLogin failed for user {username}: {e}")
+
 
     def customer_processing_page(self):
         """Customer-specific operations once logged in"""
@@ -67,13 +71,15 @@ class FrontEndManager:
             elif choice == 3:
                 self.list_itineraries()
             elif choice == 4:
-                print("Logging out...")
+                logger.info("\nLogging out...")
                 self.customer = None
                 break
+
 
     def view_profile(self):
         profile_display: Profile = Profile(self.customer)
         profile_display.view_profile()
+
 
     def create_itinerary(self):
         itinerary = Itinerary()
@@ -82,15 +88,32 @@ class FrontEndManager:
 
         if self.make_reservations(itinerary_mgr):
             self.customer.itineraries_manager.add_itinerary(itinerary)
-            print("Itinerary created")
+            logger.info("\nItinerary created.")
         else:
             del itinerary
+            logger.info("\nItinerary canceled.")
+
+
 
     def list_itineraries(self):
-        self.customer.itineraries_manager.display_itineraries()
+        itineraries = self.customer.itineraries_manager.get_itineraries()
+        if len(itineraries) > 0:
+            self.display_itineraries(itineraries)
+        else:
+            logger.info("\nThere are no itineraries to present.")
+
+
+    def display_itineraries(self, itineraries):
+        print(f"\nListing {len(itineraries)} itineraries")
+        for itinerary in itineraries:
+            print(f"Itinerary total cost {itinerary.get_total_cost()}")
+            for reservation in itinerary.get_reservations():
+                print(reservation)
+
 
     def make_reservations(self, itinerary_mgr: SingleItineraryManager):
         num_reservations = 0
+
         while True:
             choice = self.get_user_choice(
                 "\nCreate your itinerary:\n1) Add flight\n2) Add Hotel\n3) Reserve itinerary\n4) Cancel itinerary\nEnter your choice (from 1 to 4): ",
@@ -101,6 +124,7 @@ class FrontEndManager:
                                                                              selected_api, selected_flight, [])
                 itinerary_mgr.add_reservation(flight_reservation)
                 num_reservations += 1
+                logger.info("\nFlight selected successfully.")
 
             elif choice == 2:
                 selected_api, selected_room = self.select_room()
@@ -108,26 +132,39 @@ class FrontEndManager:
                                                                              selected_api, selected_room, [])
                 itinerary_mgr.add_reservation(hotel_reservation)
                 num_reservations += 1
+                logger.info("\nHotel selected successfully.")
 
             elif choice == 3:
                 if num_reservations > 0:
                     payment_method: RefundablePaymentMethodInterface = self.select_payment_method()
                     itinerary_mgr.payment_mgr.set_payment_method(payment_method)
+
                     if itinerary_mgr.book_all_reservations():
+                        logger.info("\nAll reservations successfully booked.")
                         return True
+
                 else:
-                    print("There is no reservations to book.")
+                    logger.info("\nThere is no reservations to book.")
 
             elif choice == 4:
                 if itinerary_mgr.cancel_all():
                     return False
 
+
     def select_payment_method(self):
-        """Select a payment method"""
         print("\nWhich Payment card:")
-        num_payment_methods = self.customer.payment_methods_manager.display_payment_methods()
-        choice: int = self.get_user_choice(f"Enter your choice (from 1 to {num_payment_methods}): ", num_payment_methods)
+        payment_methods = self.customer.payment_methods_manager.get_payment_methods()
+
+        self.display_payment_methods(payment_methods)
+
+        choice: int = self.get_user_choice(f"Enter your choice (from 1 to {len(payment_methods)}): ", len(payment_methods))
         return self.customer.payment_methods_manager.get_payment_method(choice)
+
+
+    def display_payment_methods(self, payment_methods):
+        for idx, payment_method in payment_methods.items():
+            print(f"{idx}) {payment_method}")
+
 
     def select_flight(self):
         flight_data = self.get_customer_flight_info()
@@ -147,6 +184,7 @@ class FrontEndManager:
         selected_index = self.get_user_choice(f"Enter a number (from 1 to {len(flight_map)}): ", len(flight_map))
         return flight_map[selected_index]
 
+
     def get_customer_flight_info(self):
         return {
             "from_location": self.get_input_string("Enter departure location: "),
@@ -157,6 +195,7 @@ class FrontEndManager:
             "num_children": self.get_input_integer("Enter number of children: "),
             "num_adults": self.get_input_integer("Enter number of adults: ")
         }
+
 
     def select_room(self):
         room_data = self.get_customer_room_info()
@@ -189,6 +228,7 @@ class FrontEndManager:
             "num_adults": self.get_input_integer("Enter number of adults: ")
         }
 
+
     def get_user_choice(self, prompt: str, num_of_choices):
         while True:
             try:
@@ -197,24 +237,27 @@ class FrontEndManager:
                     raise InvalidInputError(f"Invalid input, please enter a number (from 1 to {num_of_choices}).")
                 return choice
             except InvalidInputError as e:
-                logger.error(e)
+                logger.error(f"\n{e}")
+
 
     def get_input_string(self, prompt):
         return input(prompt)
+
 
     def get_input_date(self, prompt):
         while True:
             try:
                 return datetime.strptime(input(prompt), "%d-%m-%Y")
             except ValueError:
-                logger.error("Invalid date format. Please enter in DD-MM-YYYY format.")
+                logger.error("\nInvalid date format. Please enter in DD-MM-YYYY format.")
+
 
     def get_input_integer(self, prompt):
         while True:
             try:
                 return int(input(prompt))
             except ValueError:
-                logger.error("Invalid input. Please enter a valid number.")
+                logger.error("\nInvalid input. Please enter a valid number.")
 
 
 

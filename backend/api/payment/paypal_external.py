@@ -19,7 +19,7 @@ class PayPalOnlinePaymentAPI:
 
     def pay_money(self, money):
         print(f'PayPalOnlinePaymentAPI pay_money')
-        return False, '12345PayPal'    # Call PayPal backend
+        return True, '12345PayPal'    # Call PayPal backend
         # Switch it to False to see failures and their handling
 
     def cancel_money(self, transaction_id):

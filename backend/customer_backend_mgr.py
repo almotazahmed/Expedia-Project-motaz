@@ -129,14 +129,14 @@ class PaymentManager:
         if amount > 0:
             return self.payment_method.pay(amount)
         else:
-            logger.info("The should be grater than zero.")
+            logger.info("\nThe should be grater than zero.")
 
 
     def process_refund(self, transaction_id):
         if transaction_id is not None:
             return self.payment_method.refund(transaction_id)
         else:
-            logger.info("There is no transaction id.")
+            logger.info("\nThere is no transaction id.")
             return False, None
 
 ########################################################################################################################
@@ -229,15 +229,9 @@ class ItineraryCollectionManager:
     def add_itinerary(self, itinerary: Itinerary):
         self._itineraries.append(itinerary)
 
-    def display_itineraries(self):
-        if len(self._itineraries) > 0:
-            print(f"Listing {len(self._itineraries)} itineraries")
-            for itinerary in self._itineraries:
-                print(f"Itinerary total cost {itinerary.get_total_cost()}")
-                for reservation in itinerary.get_reservations():
-                    print(reservation)
-        else:
-            print("\nThere are no itineraries to present.")
+    def get_itineraries(self):
+        return self._itineraries.copy()
+
 
 ########################################################################################################################
 
@@ -253,10 +247,8 @@ class PaymentMethodsManager:
         self._num_payment_methods += 1
         self._payment_methods[self._num_payment_methods] = payment_method
 
-    def display_payment_methods(self):
-        for idx, payment_method in self._payment_methods.items():
-            print(f"{idx}) {payment_method}")
-        return self._num_payment_methods
+    def get_payment_methods(self):
+        return self._payment_methods.copy()
 
     def get_payment_method(self, choice: int):
         return self._payment_methods[choice]
@@ -284,57 +276,74 @@ class SingleItineraryManager:
 
                 booked_reservations.append(reservation)
 
-            logger.info("\nAll reservations successfully booked.")
             return True
 
         except (PaymentProcessingError, BookingError) as e:
-            self._handle_booking_failure(booked_reservations, e)
+            logger.error(f"\nError occurred during booking: {e}")
+            self._handle_booking_failure(booked_reservations)
             return False
 
     def _process_reservation(self, reservation: ReservationInterface):
-        status, payment_confirmation_id = self.payment_mgr.process_payment(reservation.get_cost())
-
-        if not status:
-            raise PaymentProcessingError(f"\nPayment failed for reservation [{reservation}].")
-
-        reservation.set_payment_transaction_id(payment_confirmation_id)
-
-        if not reservation.book():
-            self._process_refund(reservation)
-            raise BookingError(f"\nFailed to book reservation [{reservation}]")
-
-        return True
+        self._process_payment(reservation)
+        self._process_book(reservation)
 
 
-    def _process_refund(self, reservation):
+
+    def _handle_booking_failure(self, booked_reservations: List[ReservationInterface]):
         try:
-            if not self.payment_mgr.process_refund(reservation.get_payment_transaction_id()):
-                raise NetworkError(f"Refund failed for reservation [{reservation}].")
-        except NetworkError as e:
-            logger.error(f"\nFailed to process refund: {e}")
+            self._rollback_booked_reservations(booked_reservations)
 
+        except (BookingError, CancellationError, PaymentProcessingError) as e:
+            logger.error(f"\nError occurred during cancellation: {e}")
 
-    def _handle_booking_failure(self, booked_reservations: List[ReservationInterface], error):
-        logger.error(f"\nError occurred during booking: {error}")
-        self._rollback_booked_reservations(booked_reservations)
 
 
     def _rollback_booked_reservations(self, booked_reservations: List[ReservationInterface]):
         for reservation in booked_reservations:
-            try:
-                if not self.payment_mgr.process_refund(reservation.get_payment_transaction_id()) or not reservation.cancel():
-                    raise NetworkError(f"Rollback failed for reservation [{reservation}].")
-            except NetworkError as e:
-                logger.error(f"Failed to rollback reservation: {e}")
+            self._process_refund(reservation)
+            self._process_cancel(reservation)
+
+
+    def _process_book(self, reservation: ReservationInterface):
+        status =  reservation.book()
+
+        if not status:
+            self._process_refund(reservation)
+            raise BookingError(f"\nFailed to book reservation [{reservation}]")
+
+
+    #Rollback for cancellation not supported yet.
+    def _process_cancel(self, reservation: ReservationInterface):
+        status = reservation.cancel()
+
+        if not status:
+            raise CancellationError(f"\nFailed to cancel reservation [{reservation}].")
+
+
+    def _process_payment(self, reservation: ReservationInterface):
+        status, payment_confirmation_id = self.payment_mgr.process_payment(reservation.get_cost())
+
+        if not status:
+            raise PaymentProcessingError(f"\nFailed to pay for reservation [{reservation}].")
+
+        reservation.set_payment_transaction_id(payment_confirmation_id)
+
+
+    #Rollback for refund money not supported yet.
+    def _process_refund(self, reservation: ReservationInterface):
+        status = self.payment_mgr.process_refund(reservation.get_payment_transaction_id())
+
+        if not status:
+            raise PaymentProcessingError(f"\nFailed to refund payment for reservation [{reservation}].")
 
 
     def cancel_all(self):
         if len(self._itinerary.get_reservations()) == 0:
-            logger.info("There is no reservation to cancel.")
+            logger.info("\nThere is no reservation to cancel.")
 
         else:
             self._itinerary.get_reservations().clear()
-            logger.info("All reservations have been cancelled and removed.")
+            logger.info("\nAll reservations have been cancelled and removed.")
 
         return True
 
@@ -406,21 +415,17 @@ class FlightReservation(ReservationInterface):
         return True
 
     def cancel(self):
-        try:
-            confirmation_id = self.get_confirmation_id()
-            if not confirmation_id:
-                raise BookingError("No confirmation ID found for this reservation.")
-
-            if not self.flight_api.cancel_flight(confirmation_id):
-                raise CancellationError(f"Failed to cancel flight with confirmation ID {confirmation_id}.")
-
-            self._booking_confirmation_id = None
-            self._payment_transaction_id = None
-            return True
-
-        except Exception as e:
-            print(f"Cancellation error: {e}")
+        confirmation_id = self.get_confirmation_id()
+        if confirmation_id is None:
+            logger.error("There is no confirmation ID to cancel the flight.")
             return False
+
+        if not self.flight_api.cancel_flight(confirmation_id):
+            return False
+
+        self._booking_confirmation_id = None
+        self._payment_transaction_id = None
+        return True
 
     def __str__(self):
         return f"\t{self.flight}"
@@ -580,21 +585,17 @@ class HotelReservation(ReservationInterface):
         return True
 
     def cancel(self):
-        try:
-            confirmation_id = self.get_confirmation_id()
-            if not confirmation_id:
-                raise BookingError("No confirmation ID found for this reservation.")
-
-            if not self.hotel_api.cancel_room(confirmation_id):
-                raise CancellationError(f"Failed to cancel reservation with confirmation ID {confirmation_id}.")
-
-            self._booking_confirmation_id = None
-            self._payment_transaction_id = None
-            return True
-
-        except Exception as e:
-            print(f"Cancellation error: {e}")
+        confirmation_id = self.get_confirmation_id()
+        if confirmation_id is None:
+            logger.error("There is no confirmation ID to cancel the hotel.")
             return False
+
+        if not self.hotel_api.cancel_room(confirmation_id):
+            return False
+
+        self._booking_confirmation_id = None
+        self._payment_transaction_id = None
+        return True
 
     def __str__(self):
         return f"\t{self.room}"

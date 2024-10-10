@@ -1,3 +1,11 @@
+
+
+from frontend.customer_frontend_mgr import *
+if __name__ == "__main__":
+    front_mgr = FrontEndManager()
+    front_mgr.run()
+
+
 # from abc import ABC, abstractmethod
 # from datetime import datetime
 # from APIs.turkish_external import TurkishOnlineAPI
@@ -641,7 +649,3 @@
 #         else:
 #             print("Invalid input, please enter a number (1, 2, 3 or 4).")
 #
-from frontend.customer_frontend_mgr import *
-if __name__ == "__main__":
-    front_mgr = FrontEndManager()
-    front_mgr.run()
